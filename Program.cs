@@ -18,24 +18,42 @@ class TestClass
         // start chat session
 
         string modelPath;
+        LLamaWeights model;
 
 
         if (args.Length > 0)
         {
+            
             modelPath = args[0];
         }
         else
         {
-            modelPath = "C:\\Users\\Haotian\\AppData\\Local\\nomic.ai\\GPT4All\\Nous-Hermes-13B.Q4_K_M.gguf"; // change it to your own model path
+            modelPath = ".\\openhermes-2.5-mistral-7b.Q4_K_M.gguf"; // change it to your own model path
         }
 
+        Console.WriteLine("----------------------------");
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine(modelPath + " will be loaded.");
+        Console.ResetColor();
+        Console.WriteLine("----------------------------");
 
         // Load a model
         var parameters = new ModelParams(modelPath)
         {
             ContextSize = 512,
         };
-        using var model = LLamaWeights.LoadFromFile(parameters);
+
+        try
+        {
+            model = LLamaWeights.LoadFromFile(parameters);
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e.Message);
+            modelPath = ".\\Nous-Hermes-13B.Q4_K_M.gguf"; // change it to your own model path
+            model = LLamaWeights.LoadFromFile(parameters);
+            return;
+        }
         // Initialize a chat session
         using var contextModel = model.CreateContext(parameters);
         var ex = new InteractiveExecutor(contextModel);
@@ -70,6 +88,7 @@ class TestClass
         }
         app.Map("/ws", async context =>
         {
+            string response;
             string userString = "";
             if (context.WebSockets.IsWebSocketRequest)
             {
@@ -107,6 +126,11 @@ class TestClass
                             }
                             else if (userString == "Stop")
                             {
+                                Console.WriteLine("--------------------------");
+                                Console.ForegroundColor = ConsoleColor.Green;
+                                Console.WriteLine("Current conversation has been stopped");
+                                Console.ResetColor();
+                                Console.WriteLine("--------------------------");
                                 break;
                             }
                             
@@ -117,28 +141,49 @@ class TestClass
                                 ReceiveResult = await ws.ReceiveAsync(new ArraySegment<byte>(Buffer), CancellationToken.None);
                                 userString = Encoding.UTF8.GetString(Buffer);
                                 userString = userString.Replace("\0", "");
-                                userString = "### Instruction: \n " + userString + " Don't response to this prompt.";
+                                userString = "\r\n" + userString + "";
+                                response = "";
+
+                                Console.ForegroundColor = ConsoleColor.Red;
+                                Console.WriteLine(userString);
+                                Console.ResetColor();
+                                await foreach (var text in session.ChatAsync(new ChatHistory.Message(role, userString), new InferenceParams { Temperature = 0.2f,AntiPrompts=["\r\n"]}))
+                                {
+                                    Console.Write(text);
+                                    response = response + text;
+
+                                }
+                                Console.WriteLine("");
+                                Console.WriteLine("-----------------------------------");
+
+                                byte[] BufferGreeting = new byte[1024];
+                                var UserGreeting = await ws.ReceiveAsync(new ArraySegment<byte>(BufferGreeting), CancellationToken.None);
+                                string GreetingString = Encoding.UTF8.GetString(BufferGreeting);
+                                userString = "User:" + GreetingString.Replace("\0", "").Replace("(ChatGPT)", "") + "";
+
                                 Console.WriteLine(userString);
                                 // role = AuthorRole.System;
                             }
-
+                            else
+                            {
+                                userString = "" + userString + "";
+                            }
 
                             // send message
                             // var message = "The current time is :" + DateTime.Now.ToString("HH:mm:ss");
-                            string response = "";
-                            await foreach (var text in session.ChatAsync(new ChatHistory.Message(role, userString), new InferenceParams { Temperature = 0.2f, AntiPrompts = ["### Input:"] }))
+                            response = "";
+                            await foreach (var text in session.ChatAsync(new ChatHistory.Message(role, userString), new InferenceParams { Temperature = 0.2f, AntiPrompts = ["User:"] }))
                             {
                                 Console.Write(text);
                                 response = response + text;
                                 
-
                             }
-                            response = response.Replace("### Input:", "");
+                            response = response.Replace("User:", "");
                             var bytesRes = Encoding.UTF8.GetBytes(response);
                             
                             await ws.SendAsync(new ArraySegment<byte>(bytesRes, 0, bytesRes.Length), WebSocketMessageType.Text, true, CancellationToken.None);
                             Console.WriteLine("");
-                            Console.WriteLine("-----------------------------------");
+                            Console.WriteLine("-------------------------------------------------");
                             //var bytes = Encoding.UTF8.GetBytes("EndResponse");
                             //var arraySegment = new ArraySegment<byte>(bytes, 0, bytes.Length);
                             //await ws.SendAsync(arraySegment,WebSocketMessageType.Text,true,CancellationToken.None);
@@ -153,6 +198,7 @@ class TestClass
                             // Print the execution time in milliseconds 
                             Console.WriteLine("The execution time of the program is {0} s",
                                               ts.TotalSeconds);
+                            Console.WriteLine("---------------------------------------------------");
 
 
                         }
